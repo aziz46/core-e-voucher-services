@@ -1,0 +1,85 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "services": [
+    {
+      "id": "postgres",
+      "name": "PostgreSQL",
+      "type": "database",
+      "image": "postgres:13-alpine"
+    },
+    {
+      "id": "credit-service",
+      "name": "Credit Service",
+      "type": "service",
+      "dockerfile": "./cmd/credit-service/Dockerfile",
+      "buildCommand": "go build -o credit-service ./cmd/credit-service",
+      "startCommand": "./credit-service",
+      "port": 8080,
+      "environment": {
+        "SERVER_PORT": "8080",
+        "SERVER_HOST": "0.0.0.0",
+        "LOG_LEVEL": "info"
+      },
+      "healthCheck": {
+        "path": "/health",
+        "port": 8080,
+        "interval": 10,
+        "timeout": 5,
+        "retries": 3
+      },
+      "volumes": [],
+      "replicas": 1
+    },
+    {
+      "id": "billing-service",
+      "name": "Billing Service",
+      "type": "service",
+      "dockerfile": "./cmd/billing-service/Dockerfile",
+      "buildCommand": "go build -o billing-service ./cmd/billing-service",
+      "startCommand": "./billing-service",
+      "port": 8080,
+      "environment": {
+        "SERVER_PORT": "8080",
+        "SERVER_HOST": "0.0.0.0",
+        "LOG_LEVEL": "info"
+      },
+      "healthCheck": {
+        "path": "/health",
+        "port": 8080,
+        "interval": 10,
+        "timeout": 5,
+        "retries": 3
+      },
+      "volumes": [],
+      "replicas": 1
+    },
+    {
+      "id": "ppob-core",
+      "name": "PPOB Core Service",
+      "type": "service",
+      "dockerfile": "./cmd/ppob-core/Dockerfile",
+      "buildCommand": "go build -o ppob-core ./cmd/ppob-core",
+      "startCommand": "./ppob-core",
+      "port": 8080,
+      "environment": {
+        "SERVER_PORT": "8080",
+        "SERVER_HOST": "0.0.0.0",
+        "LOG_LEVEL": "info"
+      },
+      "healthCheck": {
+        "path": "/health",
+        "port": 8080,
+        "interval": 10,
+        "timeout": 5,
+        "retries": 3
+      },
+      "volumes": [],
+      "replicas": 1
+    }
+  ],
+  "variables": {
+    "ENVIRONMENT": "production",
+    "LOG_LEVEL": "info",
+    "SERVER_TIMEZONE": "Asia/Jakarta"
+  }
+}

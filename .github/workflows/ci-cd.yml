@@ -1,0 +1,275 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  # ==================== Build & Test ====================
+  build-and-test:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:13-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres123
+          POSTGRES_DB: e_voucher
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.20'
+          cache: 'go'
+
+      - name: Run migrations
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres123
+          PGDATABASE: e_voucher
+        run: |
+          psql << EOF
+          CREATE TABLE IF NOT EXISTS tenants (
+            id VARCHAR(36) PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            plan VARCHAR(50) NOT NULL DEFAULT 'basic',
+            api_key VARCHAR(255) NOT NULL UNIQUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );
+          
+          CREATE TABLE IF NOT EXISTS partners (
+            id VARCHAR(36) PRIMARY KEY,
+            tenant_id VARCHAR(36) NOT NULL,
+            name VARCHAR(255) NOT NULL,
+            kyc_status VARCHAR(50) DEFAULT 'pending',
+            contact VARCHAR(255),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+          );
+          
+          CREATE TABLE IF NOT EXISTS credit_limits (
+            partner_id VARCHAR(36) PRIMARY KEY,
+            limit_total BIGINT NOT NULL DEFAULT 1000000,
+            limit_used BIGINT NOT NULL DEFAULT 0,
+            limit_available BIGINT NOT NULL DEFAULT 1000000,
+            reset_period VARCHAR(50) DEFAULT 'daily',
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (partner_id) REFERENCES partners(id)
+          );
+          
+          CREATE TABLE IF NOT EXISTS transactions (
+            id VARCHAR(36) PRIMARY KEY,
+            tenant_id VARCHAR(36) NOT NULL,
+            partner_id VARCHAR(36) NOT NULL,
+            amount BIGINT NOT NULL,
+            fee BIGINT NOT NULL DEFAULT 0,
+            total BIGINT NOT NULL,
+            status VARCHAR(50) DEFAULT 'pending',
+            provider VARCHAR(100) DEFAULT 'mock_provider',
+            provider_tx_id VARCHAR(255),
+            idempotency_key VARCHAR(255) UNIQUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+            FOREIGN KEY (partner_id) REFERENCES partners(id)
+          );
+          
+          CREATE TABLE IF NOT EXISTS invoices (
+            id VARCHAR(36) PRIMARY KEY,
+            tenant_id VARCHAR(36) NOT NULL,
+            partner_id VARCHAR(36) NOT NULL,
+            period_start TIMESTAMP NOT NULL,
+            period_end TIMESTAMP NOT NULL,
+            amount_due BIGINT NOT NULL DEFAULT 0,
+            status VARCHAR(50) DEFAULT 'draft',
+            due_date TIMESTAMP NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+            FOREIGN KEY (partner_id) REFERENCES partners(id)
+          );
+          
+          CREATE TABLE IF NOT EXISTS receivables (
+            id VARCHAR(36) PRIMARY KEY,
+            tenant_id VARCHAR(36) NOT NULL,
+            partner_id VARCHAR(36) NOT NULL,
+            amount BIGINT NOT NULL,
+            status VARCHAR(50) DEFAULT 'outstanding',
+            tx_id VARCHAR(36),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+            FOREIGN KEY (partner_id) REFERENCES partners(id),
+            FOREIGN KEY (tx_id) REFERENCES transactions(id)
+          );
+          
+          CREATE TABLE IF NOT EXISTS provider_configs (
+            id VARCHAR(36) PRIMARY KEY,
+            tenant_id VARCHAR(36) NOT NULL,
+            provider_name VARCHAR(100) NOT NULL,
+            creds_encrypted TEXT,
+            endpoint VARCHAR(255),
+            active BOOLEAN DEFAULT true,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+          );
+          
+          CREATE TABLE IF NOT EXISTS audit_logs (
+            id VARCHAR(36) PRIMARY KEY,
+            resource_type VARCHAR(100),
+            resource_id VARCHAR(36),
+            action VARCHAR(100),
+            payload_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );
+          EOF
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run linter
+        uses: golangci/golangci-lint-action@v3
+        with:
+          version: latest
+          args: --timeout=5m
+
+      - name: Run tests
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres123
+          PGDATABASE: e_voucher
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+        run: |
+          go test -v -race -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage.out
+          flags: unittests
+          name: codecov-umbrella
+
+  # ==================== Build Docker Images ====================
+  build-docker:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Build credit-service image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./cmd/credit-service/Dockerfile
+          tags: credit-service:${{ github.sha }}
+          outputs: type=docker,dest=/tmp/credit-service.tar
+
+      - name: Build billing-service image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./cmd/billing-service/Dockerfile
+          tags: billing-service:${{ github.sha }}
+          outputs: type=docker,dest=/tmp/billing-service.tar
+
+      - name: Build ppob-core image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./cmd/ppob-core/Dockerfile
+          tags: ppob-core:${{ github.sha }}
+          outputs: type=docker,dest=/tmp/ppob-core.tar
+
+  # ==================== Deploy to Railway ====================
+  deploy-railway:
+    needs: build-docker
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          npm install -g @railway/cli
+          railway link ${{ secrets.RAILWAY_PROJECT_ID }}
+          railway up --service credit-service
+          railway up --service billing-service
+          railway up --service ppob-core
+
+      - name: Run migrations
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway link ${{ secrets.RAILWAY_PROJECT_ID }}
+          railway database exec < migrations/001_init.sql
+          railway database exec < migrations/002_seed.sql
+
+      - name: Health check
+        run: |
+          sleep 30
+          for service in credit-service billing-service ppob-core; do
+            url="https://${{ secrets.RAILWAY_PROJECT_ID }}-$service.up.railway.app/health"
+            echo "Checking $service..."
+            curl -f $url || exit 1
+          done
+
+      - name: Notify Slack
+        if: always()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "text": "Deployment Status: ${{ job.status }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Core E-Voucher Deployment*\nStatus: ${{ job.status }}\nCommit: ${{ github.sha }}"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
