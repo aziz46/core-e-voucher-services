@@ -17,7 +17,7 @@
    * `migrations/` (sql)
    * `docs/` (OpenAPI + README)
    * `tests/` (integration + load test)
-2. Implementasi 3 layanan (Golang, gin/fiber) dengan Dockerfile:
+2. Implementasi 3 layanan (Golang fiber V2) dengan Dockerfile:
 
    * `credit-service` — check/reduce/restore limit, webhook consumer for payment
    * `billing-service` — invoice generator, reminder, payment callback handler
