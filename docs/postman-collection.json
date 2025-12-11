@@ -1,0 +1,269 @@
+{
+  "info": {
+    "_postman_id": "e-voucher-collection",
+    "name": "Core E-Voucher PPOB API",
+    "description": "Postman collection untuk testing Core E-Voucher PPOB APIs",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "PPOB Core Service",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8080/health",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8080",
+              "path": ["health"]
+            }
+          }
+        },
+        {
+          "name": "Create Transaction",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "sk_live_abc123xyz789"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "550e8400-e29b-41d4-a716-446655440000"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_code\": \"PLN_PREPAID\",\n  \"customer_no\": \"081234567890\",\n  \"amount\": 50000,\n  \"partner_id\": \"partner_001\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost:8080/v1/tenant_001/transactions",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8080",
+              "path": ["v1", "tenant_001", "transactions"]
+            }
+          }
+        },
+        {
+          "name": "Get Transaction",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "sk_live_abc123xyz789"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:8080/v1/tenant_001/transactions/123e4567-e89b-12d3-a456-426614174000",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8080",
+              "path": ["v1", "tenant_001", "transactions", "123e4567-e89b-12d3-a456-426614174000"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Credit Service",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8081/health",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8081",
+              "path": ["health"]
+            }
+          }
+        },
+        {
+          "name": "Get Credit Limit",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Service-Token",
+                "value": "internal-service-token"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:8081/v1/partners/partner_001/limit",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8081",
+              "path": ["v1", "partners", "partner_001", "limit"]
+            }
+          }
+        },
+        {
+          "name": "Reserve Credit",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Service-Token",
+                "value": "internal-service-token"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tx_id\": \"123e4567-e89b-12d3-a456-426614174000\",\n  \"amount\": 52500\n}"
+            },
+            "url": {
+              "raw": "http://localhost:8081/v1/partners/partner_001/reserve",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8081",
+              "path": ["v1", "partners", "partner_001", "reserve"]
+            }
+          }
+        },
+        {
+          "name": "Restore Credit",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Service-Token",
+                "value": "internal-service-token"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tx_id\": \"123e4567-e89b-12d3-a456-426614174000\",\n  \"amount\": 52500\n}"
+            },
+            "url": {
+              "raw": "http://localhost:8081/v1/partners/partner_001/restore",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8081",
+              "path": ["v1", "partners", "partner_001", "restore"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Billing Service",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8082/health",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8082",
+              "path": ["health"]
+            }
+          }
+        },
+        {
+          "name": "List Invoices",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "sk_live_abc123xyz789"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:8082/v1/tenants/tenant_001/invoices?limit=10&offset=0",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8082",
+              "path": ["v1", "tenants", "tenant_001", "invoices"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Generate Invoices",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "sk_live_abc123xyz789"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"period\": \"monthly\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost:8082/v1/tenants/tenant_001/invoices/generate",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8082",
+              "path": ["v1", "tenants", "tenant_001", "invoices", "generate"]
+            }
+          }
+        },
+        {
+          "name": "Payment Callback",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenant_id\": \"tenant_001\",\n  \"partner_id\": \"partner_001\",\n  \"invoice_id\": \"inv_001\",\n  \"amount\": 250000\n}"
+            },
+            "url": {
+              "raw": "http://localhost:8082/v1/payments/callback",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8082",
+              "path": ["v1", "payments", "callback"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,552 @@
+openapi: 3.0.0
+info:
+  title: Core E-Voucher PPOB API
+  description: |
+    API untuk sistem PPOB (Payment Point of Banking) dengan model postpaid.
+    Sistem mendukung transaksi pulsa, tagihan, dan berbagai produk pembayaran lainnya.
+  version: 1.0.0
+  contact:
+    name: API Support
+    email: support@evoucher.dev
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:8080/v1
+    description: Development Server
+  - url: http://ppob-core:8080/v1
+    description: Production Server
+
+paths:
+  # ==================== PPOB Core Service ====================
+  /{tenant}/transactions:
+    post:
+      tags:
+        - PPOB Core
+      summary: Create a new PPOB transaction
+      description: |
+        Membuat transaksi PPOB baru dengan validasi credit limit dan provider integration.
+        
+        Flow:
+        1. Validate tenant & API key
+        2. Check credit limit (call credit-service)
+        3. Reserve amount from credit limit
+        4. Call provider payment
+        5. On success: mark transaction success
+        6. On failure: restore credit and return error
+      operationId: createTransaction
+      parameters:
+        - name: tenant
+          in: path
+          required: true
+          schema:
+            type: string
+            example: tenant_001
+          description: Tenant identifier
+        - name: X-API-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            example: sk_live_abc123xyz789
+          description: API Key untuk autentikasi tenant
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+            example: 550e8400-e29b-41d4-a716-446655440000
+          description: Unique key untuk idempotency (opsional)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                product_code:
+                  type: string
+                  example: PLN_PREPAID
+                  description: Kode produk
+                customer_no:
+                  type: string
+                  example: "081234567890"
+                  description: Nomor pelanggan/tujuan pembayaran
+                amount:
+                  type: integer
+                  format: int64
+                  example: 50000
+                  description: Nominal transaksi (dalam rupiah)
+                partner_id:
+                  type: string
+                  example: partner_001
+                  description: ID partner/reseller
+                idempotency_key:
+                  type: string
+                  format: uuid
+                  description: Unique key untuk idempotency (opsional)
+              required:
+                - product_code
+                - customer_no
+                - amount
+                - partner_id
+      responses:
+        '201':
+          description: Transaction created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    example: 123e4567-e89b-12d3-a456-426614174000
+                  status:
+                    type: string
+                    enum: [pending, success, failed, cancelled]
+                    example: success
+                  amount:
+                    type: integer
+                    format: int64
+                    example: 50000
+                  fee:
+                    type: integer
+                    format: int64
+                    example: 2500
+                  total:
+                    type: integer
+                    format: int64
+                    example: 52500
+                  provider_tx_id:
+                    type: string
+                    example: MOCK-1234567890
+                  created_at:
+                    type: string
+                    format: date-time
+                  updated_at:
+                    type: string
+                    format: date-time
+        '400':
+          description: Bad request (invalid payload)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized (missing/invalid API key)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict (insufficient credit limit)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+                example:
+                  error: insufficient credit limit
+                  available: 40000
+                  requested: 52500
+
+  /{tenant}/transactions/{tx_id}:
+    get:
+      tags:
+        - PPOB Core
+      summary: Get transaction details
+      description: Mengambil detail transaksi berdasarkan ID
+      operationId: getTransaction
+      parameters:
+        - name: tenant
+          in: path
+          required: true
+          schema:
+            type: string
+            example: tenant_001
+        - name: tx_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            example: 123e4567-e89b-12d3-a456-426614174000
+        - name: X-API-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  status:
+                    type: string
+                  amount:
+                    type: integer
+                  fee:
+                    type: integer
+                  total:
+                    type: integer
+                  provider_tx_id:
+                    type: string
+                  created_at:
+                    type: string
+                    format: date-time
+                  updated_at:
+                    type: string
+                    format: date-time
+        '404':
+          description: Transaction not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ==================== Credit Service ====================
+  /partners/{partner_id}/limit:
+    get:
+      tags:
+        - Credit Service
+      summary: Get partner credit limit
+      description: Mengambil informasi credit limit untuk partner tertentu
+      operationId: getPartnerLimit
+      parameters:
+        - name: partner_id
+          in: path
+          required: true
+          schema:
+            type: string
+            example: partner_001
+        - name: X-Service-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Internal service token
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  partner_id:
+                    type: string
+                  limit_total:
+                    type: integer
+                    format: int64
+                  limit_used:
+                    type: integer
+                    format: int64
+                  limit_available:
+                    type: integer
+                    format: int64
+        '404':
+          description: Partner not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /partners/{partner_id}/reserve:
+    post:
+      tags:
+        - Credit Service
+      summary: Reserve credit limit
+      description: Mengurangi credit limit secara atomic (untuk transaksi baru)
+      operationId: reserveCredit
+      parameters:
+        - name: partner_id
+          in: path
+          required: true
+          schema:
+            type: string
+            example: partner_001
+        - name: X-Service-Token
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tx_id:
+                  type: string
+                  format: uuid
+                  description: Transaction ID untuk tracking
+                amount:
+                  type: integer
+                  format: int64
+                  example: 52500
+              required:
+                - tx_id
+                - amount
+      responses:
+        '200':
+          description: Credit reserved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: reserved
+                  amount:
+                    type: integer
+        '409':
+          description: Insufficient credit limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+                example:
+                  error: insufficient credit limit
+                  available: 40000
+                  requested: 52500
+
+  /partners/{partner_id}/restore:
+    post:
+      tags:
+        - Credit Service
+      summary: Restore credit limit
+      description: Mengembalikan credit limit (untuk transaksi yang gagal)
+      operationId: restoreCredit
+      parameters:
+        - name: partner_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: X-Service-Token
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tx_id:
+                  type: string
+                  format: uuid
+                amount:
+                  type: integer
+                  format: int64
+              required:
+                - tx_id
+                - amount
+      responses:
+        '200':
+          description: Credit restored successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: restored
+                  amount:
+                    type: integer
+
+  # ==================== Billing Service ====================
+  /tenants/{tenant_id}/invoices:
+    get:
+      tags:
+        - Billing Service
+      summary: List invoices
+      description: Mengambil daftar invoice untuk tenant tertentu
+      operationId: listInvoices
+      parameters:
+        - name: tenant_id
+          in: path
+          required: true
+          schema:
+            type: string
+            example: tenant_001
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: X-API-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  invoices:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Invoice'
+                  count:
+                    type: integer
+
+  /tenants/{tenant_id}/invoices/generate:
+    post:
+      tags:
+        - Billing Service
+      summary: Generate invoices
+      description: Generate invoice otomatis untuk periode tertentu
+      operationId: generateInvoices
+      parameters:
+        - name: tenant_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: X-API-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                period:
+                  type: string
+                  enum: [daily, monthly]
+                  example: monthly
+      responses:
+        '200':
+          description: Invoices generated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  count:
+                    type: integer
+
+  /payments/callback:
+    post:
+      tags:
+        - Billing Service
+      summary: Payment callback
+      description: Callback dari provider pembayaran untuk menandai invoice sebagai lunas
+      operationId: paymentCallback
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tenant_id:
+                  type: string
+                partner_id:
+                  type: string
+                invoice_id:
+                  type: string
+                  format: uuid
+                amount:
+                  type: integer
+                  format: int64
+              required:
+                - tenant_id
+                - partner_id
+                - invoice_id
+                - amount
+      responses:
+        '200':
+          description: Payment processed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: payment processed
+
+components:
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          example: insufficient credit limit
+        available:
+          type: integer
+          description: Available amount (opsional)
+        requested:
+          type: integer
+          description: Requested amount (opsional)
+
+    Invoice:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+        partner_id:
+          type: string
+        period_start:
+          type: string
+          format: date-time
+        period_end:
+          type: string
+          format: date-time
+        amount_due:
+          type: integer
+          format: int64
+        status:
+          type: string
+          enum: [draft, issued, paid, overdue, cancelled]
+        due_date:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    ServiceToken:
+      type: apiKey
+      in: header
+      name: X-Service-Token
+
+security:
+  - ApiKeyAuth: []
